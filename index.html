@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Стоп-кадр</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;600&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#ECEAF4;--ink:#15142B;--blue:#3B3BFF;--star:#FFB400;--muted:#6E6C86}
+*{box-sizing:border-box;margin:0}
+body{background:var(--paper);color:var(--ink);font:400 15px/1.4 Onest,system-ui,sans-serif;padding:calc(env(safe-area-inset-top,0px) + 22px) 14px 40px}
+h1{font:800 clamp(36px,12vw,56px)/.95 Unbounded,system-ui,sans-serif;letter-spacing:-.03em;margin-bottom:10px}
+.sub{color:var(--muted);margin-bottom:24px}
+.grid{columns:2;column-gap:10px}
+.card{display:block;width:100%;break-inside:avoid;margin-bottom:10px;padding:0;border:0;background:#fff;border-radius:18px;overflow:hidden;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.card img{display:block;width:100%;aspect-ratio:4/5;object-fit:cover;background:#d9d6ea}
+.card:nth-child(3n+2) img{aspect-ratio:1/1}
+.card:nth-child(3n) img{aspect-ratio:3/4}
+.meta{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:10px 12px 12px}
+.t{font-weight:600;font-size:14px}
+.p{font:600 13px Unbounded,sans-serif;white-space:nowrap}
+.p::after{content:" ★";color:var(--star)}
+.empty{color:var(--muted);padding:30px 0}
+.sheet{position:fixed;inset:0;display:flex;align-items:flex-end;background:rgba(21,20,43,.55);opacity:0;pointer-events:none;transition:opacity .2s}
+.sheet.on{opacity:1;pointer-events:auto}
+.panel{width:100%;background:var(--paper);border-radius:26px 26px 0 0;padding:14px 14px calc(env(safe-area-inset-bottom,0px) + 16px);transform:translateY(40px);transition:transform .25s}
+.sheet.on .panel{transform:none}
+.panel img{display:block;width:100%;max-height:52vh;object-fit:cover;border-radius:16px}
+.panel h2{font:600 20px Unbounded,sans-serif;margin:14px 2px 2px}
+.note{color:var(--muted);font-size:13px;margin:0 2px}
+.buy{width:100%;margin-top:14px;padding:16px;border:0;border-radius:16px;background:var(--blue);color:#fff;font:600 16px Onest,sans-serif;cursor:pointer}
+.buy:disabled{opacity:.6}
+.toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:12px 18px;border-radius:14px;opacity:0;transition:.25s;pointer-events:none;max-width:90vw;text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<h1>Стоп-кадр</h1>
+<p class="sub" id="sub">Загружаем витрину…</p>
+<div class="grid" id="grid"></div>
+
+<div class="sheet" id="sheet">
+  <div class="panel">
+    <img id="sImg" alt="">
+    <h2 id="sTitle"></h2>
+    <p class="note">Превью размыто. Оригинал придёт в чат с ботом после оплаты.</p>
+    <button class="buy" id="buy"></button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram && Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#ECEAF4'); tg.setBackgroundColor('#ECEAF4'); } catch (e) {} }
+
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let items = [], current = null;
+
+function toast(text) {
+  $('toast').textContent = text; $('toast').classList.add('on');
+  setTimeout(() => $('toast').classList.remove('on'), 2500);
+}
+
+function openItem(id) {
+  current = items.find(x => x.id === id);
+  if (!current) return;
+  $('sImg').src = current.img; $('sImg').alt = current.title;
+  $('sTitle').textContent = current.title;
+  $('buy').textContent = `Купить за ${current.price} ⭐`;
+  $('sheet').classList.add('on');
+}
+const closeSheet = () => $('sheet').classList.remove('on');
+$('sheet').onclick = e => { if (e.target === $('sheet')) closeSheet(); };
+document.onkeydown = e => { if (e.key === 'Escape') closeSheet(); };
+
+$('buy').onclick = async () => {
+  if (!tg || !tg.initData) return toast('Откройте магазин из Telegram');
+  $('buy').disabled = true;
+  try {
+    const r = await fetch('/api/invoice', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({item_id: current.id, init_data: tg.initData})
+    });
+    const d = await r.json();
+    if (!d.link) throw new Error(d.error || 'Не удалось создать счёт');
+    tg.openInvoice(d.link, status => {
+      if (status === 'paid') {
+        tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
+        toast('Оплачено. Фото уже в чате с ботом');
+        setTimeout(() => tg.close(), 1800);
+      }
+    });
+  } catch (e) { toast(e.message); }
+  $('buy').disabled = false;
+};
+
+async function load() {
+  try { items = await (await fetch('/api/products')).json(); }
+  catch (e) { $('sub').textContent = 'Не удалось загрузить витрину'; return; }
+  $('sub').textContent = items.length ? `${items.length} фото. Оплата звёздами.` : '';
+  $('grid').innerHTML = items.length ? items.map(i => `
+    <button class="card" onclick="openItem(${i.id})">
+      <img src="${i.img}" alt="${esc(i.title)}" loading="lazy">
+      <span class="meta"><span class="t">${esc(i.title)}</span><span class="p">${i.price}</span></span>
+    </button>`).join('') : '<p class="empty">Пока здесь пусто. Загляните позже.</p>';
+  const sp = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+  if (sp && sp.startsWith('item_')) openItem(+sp.slice(5));  // ссылка сразу на конкретный товар
+}
+load();
+</script>
+</body>
+</html>
